@@ -1,0 +1,20 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+../library/gpmp/gpmp.h
+Eigen/Dense
+-
+vector
+-
+
+/home/mason/GPMP_Mason/source/run.cpp
+gpmp.h
+/home/mason/GPMP_Mason/source/gpmp.h
+iostream
+-
+
