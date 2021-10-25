@@ -14,6 +14,7 @@ int main() {
     BlueRov.add_DOF(.1,2.,0.,4.,3,false);
     BlueRov.add_DOF(.1,2.,0.,4.,4,false);
     BlueRov.add_DOF(.1,2.,0.,5.,5,false);
+    BlueRov.optimize(2.,3,7);
     BlueRov.get_something();
     
     

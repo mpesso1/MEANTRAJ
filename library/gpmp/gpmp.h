@@ -63,7 +63,7 @@ namespace root {
 
             float c; // magnitude of del_c 
 
-            std::vector<float> ocv_idx; // idx to which specified DOF will be considered within the the cost function
+            std::vector<int> ocv_idx; // idx to which specified DOF will be considered within the the cost function
 
             int ocv_size; // object concerning varibale index vector size
 
@@ -82,6 +82,8 @@ namespace root {
             Eigen::Matrix<float,Eigen::Dynamic,Eigen::Dynamic> g_pos; // position object cost matrix
 
             Eigen::Matrix<float,Eigen::Dynamic,Eigen::Dynamic> g_vel; // velocity object cost matrix
+
+            Eigen::Matrix<float,Eigen::Dynamic,Eigen::Dynamic> obs; // vector containing cartesion position of obsticals
 
 
 
@@ -132,8 +134,11 @@ namespace root {
             void update_J(int); // the int will define the index of which state we are at
             // since there is no matrix dot product in cpp I will use this function to swap values for the Jacobian
 
-            void update_g(float,float,float);
+            void update_g();
             // updates the cost matrix for update rule
+
+            void update_optimizaion();
+            // function that updates variables used within update rule... as states change
     
     };
 }

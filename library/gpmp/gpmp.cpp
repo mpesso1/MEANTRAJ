@@ -14,13 +14,13 @@ root::MeanTraj::MeanTraj(int DOF, int num_of_steps, int ocv) {
     mean_state.resize(DOF*2,steps+1); // all state defining varibales and time variables must include a +1 in demension defining ste size
     // the x2 is so that the mean position and velocity can be stored within the same matrix
     state_time.resize(1,num_of_steps+1);
-    B.resize(steps+1,steps); // The is supposed to be an unsquare marix!
-    Q.resize(steps+1,steps+1);
-    Ka_inv.resize(steps+1,steps+1);
-    Kv_inv.resize(steps+1,steps+1);
-    Kv.resize(steps+1,steps+1);
-    Kp_inv.resize(steps+1,steps+1);
-    Kp.resize(steps+1,steps+1);
+    B.resize(steps+2,steps+1); // The is supposed to be an unsquare marix!
+    Q.resize(steps+2,steps+2);
+    Ka_inv.resize(steps+2,steps+2);
+    Kv_inv.resize(steps+2,steps+2);
+    Kv.resize(steps+2,steps+2);
+    Kp_inv.resize(steps+2,steps+2);
+    Kp.resize(steps+2,steps+2);
     define_B();
 
     // -- Optimization Variabels
@@ -41,8 +41,10 @@ root::MeanTraj::MeanTraj(int DOF, int num_of_steps, int ocv) {
     I = Eigen::Matrix<float,3,3>::Identity();
     IJ = I;
 
-    g_pos.resize(DOF,steps+1);
-    g_vel.resize(DOF,steps+1);
+    g_pos.resize(ocv,steps+1);
+    g_vel.resize(ocv,steps+1);
+
+    obs.resize(ocv,ocv);
 }
 
 // ************ within code I will point out the demensions of some variables --> (steps+1) = (s1) ; (steps+1,steps+1) = (s1,s1) ; (steps) = (s) ***********
@@ -93,6 +95,8 @@ void root::MeanTraj::add_DOF(float a, float v0, float p0, float pf, int idx, boo
         define_Q(); // Matrix used to solve for prior kernals -- cannot be defined in the constructor because it requires sensitivity variables -- however if Q wouldnt change it would be nice to define it only once.
         define_Ka_inv(); // basis kernal used to solve for position and velocity kernal
         define_kernals(); // solve for position and veloity kernal
+
+        declare_optimization(); // create variables that need to be ready for optimization
     }
 
     if (idx+1 > DsOF) {
@@ -164,36 +168,61 @@ void root::MeanTraj::add_ocv(int index) {
 
 
 void root::MeanTraj::declare_optimization() {
-    for (int i=0;i<=steps+1;i++) {
-        mag_ocv(i) = sqrt(pow(mean_state(ocv_idx[0]*2+1,i),2)+pow(mean_state(ocv_idx[1]*2+1,i),2)+pow(mean_state(ocv_idx[2]*2+1,i),2)); // (1,s1)
+    for (int i=0;i<=steps;i++) {
+        mag_ocv(0,i) = sqrt(pow(mean_state(ocv_idx[0]*2+1,i),2)+pow(mean_state(ocv_idx[1]*2+1,i),2)+pow(mean_state(ocv_idx[2]*2+1,i),2)); // (1,s1)
         for (int j=0;j<ocv_size;j++) {
             J(i,j) = mean_state(ocv_idx[j]*2+1,i); // (s1,ocv)
             unit_prime(j,i) = mean_state(ocv_idx[j]*2+1,i)/mag_ocv(i); // (ocv,s1)
             unit_dubprime(j,i) = init_parameters(0,ocv_idx[j]); // (ocv,s1)
             final_pos(i,j) = mean_state(ocv_idx[j]*2,i); // (ocv,s1)
-            mean_pos(i,j) = final_pos(j,i); // (ocv,s1)
+            mean_pos(i,j) = final_pos(i,j); // (ocv,s1)
             final_vel(i,j) = mean_state(ocv_idx[j]*2+1,i); // (ocv,s1)
-            mean_vel(i,j) = final_vel(j,i); // (ocv,s1)
+            mean_vel(i,j) = final_vel(i,j); // (ocv,s1)
         }
     }
 }
 
-void root::MeanTraj::optimize(float obj_x,float obj_y,float obj_z) {
-    update_g(obj_x,obj_y,obj_z);
-
-    final_pos = final_pos - (1/sensitivity[1])*Kp*(sensitivity[0]*Kp_inv*(final_pos-mean_pos) + g_pos.transpose());
-    final_vel = final_vel - (1/sensitivity[1])*Kv*(sensitivity[0]*Kv_inv*(final_vel-mean_vel) + g_vel.transpose());
+void root::MeanTraj::update_optimizaion() {
+    for (int i=0;i<=steps;i++) {
+        mag_ocv(i) = sqrt(pow(final_vel(i,0),2)+pow(final_vel(i,1),2)+pow(final_vel(i,2),2)); // (1,s1)
+        mean_pos.row(i) = final_pos.row(i);
+        mean_vel.row(i) = final_vel.row(i);
+        J.row(i) = final_vel.row(i);
+        unit_prime(0,i) = final_vel(i,0)/mag_ocv(i);
+        unit_prime(1,i) = final_vel(i,1)/mag_ocv(i);
+        unit_prime(2,i) = final_vel(i,2)/mag_ocv(i);
+    }
 }
 
-void root::MeanTraj::update_g(float obj_x, float obj_y, float obj_z) { // the way you initialize your ocv must be in the same order that you input your object detection cordinates ********
+void root::MeanTraj::optimize(float obj_x,float obj_y,float obj_z) {
+    obs(0) = obj_x;
+    obs(1) = obj_y;
+    obs(2) = obj_z;
+
+    update_g();
+    for (int i=0;i<100;i++) {
+        final_pos = final_pos - (1/sensitivity[1])*Kp*(sensitivity[0]*Kp_inv*(final_pos-mean_pos) + g_pos.transpose());
+        final_vel = final_vel - (1/sensitivity[1])*Kv*(sensitivity[0]*Kv_inv*(final_vel-mean_vel) + g_vel.transpose());
+        update_optimizaion();
+    }
+}
+
+void root::MeanTraj::update_g() { // the way you initialize your ocv must be in the same order that you input your object detection cordinates ********
     for (int i=0;i<=steps;i++) {
         update_J(i);
         for (int j=0;j<ocv_size;j++) {
-            del_c(j) = obj_x - final_pos(j,i); // vector computed distance between object and robot state(i).  Both vectors are taken from the robots initial position
+            del_c(j) = obs(j) - final_pos(i,j); // vector computed distance between object and robot state(i).  Both vectors are taken from the robots initial position
+            if (abs(del_c(j)) < .5) {
+                del_c(j) = 1;
+            }
+            else {
+                del_c(j) = 0;
+            }
         }
+        std::cout << del_c << std::endl;
         c = sqrt(pow(del_c(0),2) + pow(del_c(1),2) + pow(del_c(2),2));  /// <----- ** hard coded indexes, ultimitly you wouldnt know how many indexes**************
-        g_pos.col(i) = J.transpose()*mag_ocv(i)*(I - unit_prime.col(i)*unit_prime.col(i).transpose())*del_c - c*pow(mag_ocv(i),-2)*(I - unit_prime.col(i)*unit_prime.col(i).transpose())*unit_dubprime.col(i);
-        g_vel.col(i) = J.transpose()*c*unit_prime.col(i);
+        g_pos.col(i) = IJ.transpose()*mag_ocv(i)*(I - unit_prime.col(i)*unit_prime.col(i).transpose())*del_c - c*pow(mag_ocv(i),-2)*(I - unit_prime.col(i)*unit_prime.col(i).transpose())*unit_dubprime.col(i);
+        g_vel.col(i) = IJ.transpose()*c*unit_prime.col(i);
     }
 }
 
@@ -206,9 +235,43 @@ void root::MeanTraj::update_J(int step) {
 
 // Display Stuff ----
 void root::MeanTraj::get_something() {
-    std::cout << steps << std::endl;
-    std::cout << mean_state.rows() << std::endl;
-    std::cout << mean_state.cols() << std::endl;
-    std::cout << Kv << std::endl;
-    std::cout << Q.rows() << "  " << Q.cols() << std::endl;
+
+    //std::cout << Kp_inv << std::endl;
+    //std::cout << Kp_inv.rows() << "," << Kp_inv.cols() << std::endl;
+    //td::cout << "  " << std::endl;
+
+    //std::cout << Kp << std::endl;
+    //std::cout << Kp.rows() << "," << Kp_inv.cols() << std::endl;
+    //std::cout << "  " << std::endl;
+
+    //std::cout << Kv << std::endl;
+    //std::cout << Kv.rows() << "," << Kp_inv.cols() << std::endl;    
+    //std::cout << "  " << std::endl;
+
+    //std::cout << Kv_inv << std::endl;
+    //std::cout << Kv_inv.rows() << "," << Kp_inv.cols() << std::endl;
+
+    //std::cout << "  " << std::endl;
+
+    std::cout << final_pos.transpose() << std::endl;
+    std::cout << final_pos.rows() << "," << final_pos.cols() << std::endl;
+    std::cout << "  " << std::endl;
+
+    //std::cout << del_c << std::endl;
+
+    //std::cout << mean_pos << std::endl;
+    //std::cout << mean_pos.rows() << "," << mean_pos.cols() << std::endl;
+    //std::cout << "  " << std::endl;
+
+    //std::cout << g_pos << std::endl;
+    //std::cout << g_pos.rows() << "," << g_pos.cols() << std::endl;
+    //std::cout << "  " << std::endl;
+
+    //std::cout << mean_state << std::endl;
+    //std::cout << mean_state.rows() << "," << mean_state.cols() << std::endl;
+    //std::cout << "  " << std::endl;
+
+
+    //std::cout << Q.rows() << "  " << Q.cols() << std::endl;
 }
+
