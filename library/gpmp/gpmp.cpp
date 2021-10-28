@@ -65,7 +65,9 @@ void root::MeanTraj::add_DOF(float a, float v0, float p0, float pf, int idx, boo
     mean_state(idx+1,0) = v0;
 
     if (a == 0) {
-        final_times[idx] = (pf-p0)/v0;
+        std::cout << "wow" << std::endl;
+        final_times.push_back((pf-p0)/v0);
+        std::cout << "HEY" << std::endl;
     }
     else {
         float tplus = (-v0 + sqrt(pow(v0,2)-4*(a/2)*(p0-pf)))/a;
@@ -219,7 +221,6 @@ void root::MeanTraj::update_g() { // the way you initialize your ocv must be in 
                 del_c(j) = 0;
             }
         }
-        std::cout << del_c << std::endl;
         c = sqrt(pow(del_c(0),2) + pow(del_c(1),2) + pow(del_c(2),2));  /// <----- ** hard coded indexes, ultimitly you wouldnt know how many indexes**************
         g_pos.col(i) = IJ.transpose()*mag_ocv(i)*(I - unit_prime.col(i)*unit_prime.col(i).transpose())*del_c - c*pow(mag_ocv(i),-2)*(I - unit_prime.col(i)*unit_prime.col(i).transpose())*unit_dubprime.col(i);
         g_vel.col(i) = IJ.transpose()*c*unit_prime.col(i);
@@ -253,9 +254,9 @@ void root::MeanTraj::get_something() {
 
     //std::cout << "  " << std::endl;
 
-    std::cout << final_pos.transpose() << std::endl;
-    std::cout << final_pos.rows() << "," << final_pos.cols() << std::endl;
-    std::cout << "  " << std::endl;
+    //std::cout << final_pos.transpose() << std::endl;
+    //std::cout << final_pos.rows() << "," << final_pos.cols() << std::endl;
+    //std::cout << "  " << std::endl;
 
     //std::cout << del_c << std::endl;
 
