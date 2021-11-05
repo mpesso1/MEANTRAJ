@@ -47,8 +47,6 @@ namespace root {
             // ----- Optimization Variables
 
 
-            Eigen::Matrix<float,Eigen::Dynamic,Eigen::Dynamic> state; // matrix used to hold the actual state as the optimization process runs
-
             std::vector<float> sensitivity; // stores the sensitiviy of the update rule --> (0) = scales how much entire state is alowed to update, (1) = scales how much the state is allowed to deviate from prior
 
             Eigen::Matrix<float,Eigen::Dynamic,Eigen::Dynamic> mag_ocv; // magnitude of vector responsiple for ocv's.
@@ -85,6 +83,10 @@ namespace root {
 
             Eigen::Matrix<float,Eigen::Dynamic,Eigen::Dynamic> obs; // vector containing cartesion position of obsticals
 
+            Eigen::Matrix<float,Eigen::Dynamic,Eigen::Dynamic> obs_plot;
+
+            Eigen::Matrix<float,Eigen::Dynamic,Eigen::Dynamic> check_pos; // camparitor to check if optimization reaches criterion
+
 
 
         public:
@@ -120,6 +122,15 @@ namespace root {
             void get_something();
             // displays private variables to the terminal
 
+            void traj(int);
+            // function used to display to shell perfectly for python code to run custom traj function
+
+            void surf(int);
+            // function used to diplay to shell perfectly for python code to run custom surf function
+
+            void update_accel(); 
+            // updates the accelerations of each DOF so their elapsed times to reach their goal states are all the same
+
             void add_ocv(int);
             // keeps track of the index of variabels that we will include in the object cost function.  These variables are the only variables that can affect interaction with objects
             // For example, consider a spherical robot.  We would not be concerned with the oriantation that the robot would be when considering object interation
@@ -128,14 +139,14 @@ namespace root {
             void declare_optimization();
             // sets all of the initialized cost variables equal to whatever they are supposed to be
             
-            void optimize(float,float,float);
+            void optimize(std::vector<float>,std::vector<float>,std::vector<float>);
             // calculate cost function with input from sensors defining where opsticals are
 
             void update_J(int); // the int will define the index of which state we are at
             // since there is no matrix dot product in cpp I will use this function to swap values for the Jacobian
 
             void update_g();
-            // updates the cost matrix for update rule
+            // checks for obsticals at each state and computes obsticle gradient
 
             void update_optimizaion();
             // function that updates variables used within update rule... as states change
