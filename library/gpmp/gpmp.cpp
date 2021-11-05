@@ -13,20 +13,19 @@ root::MeanTraj::MeanTraj(int DOF, int num_of_steps, int ocv) {
     steps = num_of_steps;
     mean_state.resize(DOF*2,steps+1); // all state defining varibales and time variables must include a +1 in demension defining ste size
     // the x2 is so that the mean position and velocity can be stored within the same matrix
-    state_time.resize(1,num_of_steps+1);
+    state_time.resize(1,steps+1);
     B.resize(steps+2,steps+1); // The is supposed to be an unsquare marix!
     Q.resize(steps+2,steps+2);
-    Ka_inv.resize(steps+2,steps+2);
-    Kv_inv.resize(steps+2,steps+2);
-    Kv.resize(steps+2,steps+2);
-    Kp_inv.resize(steps+2,steps+2);
-    Kp.resize(steps+2,steps+2);
+    Ka_inv.resize(steps+1,steps+1);
+    Kv_inv.resize(steps+1,steps+1);
+    Kv.resize(steps+1,steps+1);
+    Kp_inv.resize(steps+1,steps+1);
+    Kp.resize(steps+1,steps+1);
     define_B();
 
     // -- Optimization Variabels
 
     ocv_size = ocv;
-    state.resize(DOF*2,steps+1); // may not need this variable as we used a different one for same pupose, dont forget to delete in other places
     mag_ocv.resize(1,steps+1);
     J.resize(steps+1,ocv_size);
     unit_prime.resize(ocv_size,steps+1);
@@ -44,7 +43,9 @@ root::MeanTraj::MeanTraj(int DOF, int num_of_steps, int ocv) {
     g_pos.resize(ocv,steps+1);
     g_vel.resize(ocv,steps+1);
 
-    obs.resize(ocv,ocv);
+    obs.resize(ocv,1);
+
+    check_pos.resize(steps+1,ocv_size);
 }
 
 // ************ within code I will point out the demensions of some variables --> (steps+1) = (s1) ; (steps+1,steps+1) = (s1,s1) ; (steps) = (s) ***********
@@ -52,7 +53,7 @@ root::MeanTraj::MeanTraj(int DOF, int num_of_steps, int ocv) {
 // Prior ----
 
 root::MeanTraj::~MeanTraj(){ 
-    std::cout << "DOF ENDED" << std::endl;
+    //std::cout << "DOF ENDED" << std::endl;
 } // Define destructor in cpp
 
 void root::MeanTraj::add_DOF(float a, float v0, float p0, float pf, int idx, bool ocv) {
@@ -61,48 +62,53 @@ void root::MeanTraj::add_DOF(float a, float v0, float p0, float pf, int idx, boo
     init_parameters(2,idx) = p0;
     init_parameters(3,idx) = pf;
 
-    mean_state(idx,0) = p0;
+    mean_state(idx,0) = p0; // initial position and velocity values get stored into mean_state vector... need to eliminate this vecotor as it is just a place holder for moving states.
     mean_state(idx+1,0) = v0;
 
     if (a == 0) {
-        std::cout << "wow" << std::endl;
         final_times.push_back((pf-p0)/v0);
-        std::cout << "HEY" << std::endl;
     }
     else {
         float tplus = (-v0 + sqrt(pow(v0,2)-4*(a/2)*(p0-pf)))/a;
         float tminus = (-v0 - sqrt(pow(v0,2)-4*(a/2)*(p0-pf)))/a;
+        //std::cout << tplus << " " << tminus << std::endl;
         if (tplus > tminus) {
-            final_times.push_back(tplus);
+            final_times.push_back(abs(tplus));
         }
         else {
-            final_times.push_back(tminus);
+            final_times.push_back(abs(tminus));
         }
     }
     if (final_times[idx] > root_time) {
         root_time = final_times[idx];
     }
-
     if (ocv) {
         add_ocv(idx);
     }
 
     if (idx+1 == DsOF) {
         if (ocv_idx.size() != ocv_size) {
-            std::cout << "Object concerning varibales (ocv) does not equal the amount of ocv variables initiated" << std::endl;
-            std::cout << "make sure you declare boolean true for each DOF that is a ocv and make sure it equals the ocv_size you initiate in the last paramater of class instance" << std::endl;
+            //std::cout << "Object concerning varibales (ocv) does not equal the amount of ocv variables initiated" << std::endl;
+            //std::cout << "make sure you declare boolean true for each DOF that is a ocv and make sure it equals the ocv_size you initiate in the last paramater of class instance" << std::endl;
         }
+        
         define_step(); // size of step
+        
+        update_accel(); // update acceleration values for each DOF so all DOF move along at the same total elapsed time.
+        
         define_states(); // updates prior states -- adjusts for timeing inconsistencies -- stores in "mean_state ()
+        
         define_Q(); // Matrix used to solve for prior kernals -- cannot be defined in the constructor because it requires sensitivity variables -- however if Q wouldnt change it would be nice to define it only once.
+        
         define_Ka_inv(); // basis kernal used to solve for position and velocity kernal
+        
         define_kernals(); // solve for position and veloity kernal
 
         declare_optimization(); // create variables that need to be ready for optimization
     }
 
     if (idx+1 > DsOF) {
-        std::cout << "TOO MANY DOF SPECIFIED" << std::endl;
+        //std::cout << "TOO MANY DOF SPECIFIED" << std::endl;
     }
 }
 
@@ -110,25 +116,24 @@ void root::MeanTraj::define_step() {
     step = root_time/steps;
 }
 
+void root::MeanTraj::update_accel() {
+    for (int i=0; i<DsOF-1;i++) {
+        init_parameters(0,i) = 2/pow(root_time,2)*((init_parameters(3,i)-init_parameters(2,i))-init_parameters(1,i)*root_time);
+    }
+}
+
 void root::MeanTraj::define_states() {
     float add = 0;
     int i = 0;
-    while(add <= root_time+.01) { // had errors occure were the last column defining the mean was coming out as 0.  This was due to the add being greater than the root_time before it was supposed to.  This error is beleived to occure because of a truncation/rounding error by computer.
+    while(add < root_time+.01) { // had errors occure were the last column defining the mean was coming out as 0.  This was due to the add being greater than the root_time before it was supposed to.  This error is beleived to occure because of a truncation/rounding error by computer.
         state_time(0,i) = add;
         for (int j = 0; j<=DsOF-1; j++) {
-            if (add>=final_times[j]) {
-                mean_state(2*j,i) = init_parameters(3,j);
-                mean_state(2*j+1,i) = init_parameters(0,j)*root_time + init_parameters(1,j); // need to make a decision if we should set acceleration to 0 once this occurs, and how that would affect the results in optimization
-            }
-            else {
-                mean_state(2*j,i) = init_parameters(0,j)*add*add/2 + init_parameters(1,j)*add + init_parameters(2,j);
-                mean_state(2*j+1,i) = init_parameters(0,j)*add + init_parameters(1,j);
-            }
+            mean_state(2*j,i) = init_parameters(0,j)*pow(add,2)/2 + init_parameters(1,j)*add + init_parameters(2,j);
+            mean_state(2*j+1,i) = init_parameters(0,j)*add + init_parameters(1,j);
         }
         add+=step;
         i+=1;
     }
-    state = mean_state;
 }
 
 void root::MeanTraj::define_B() {
@@ -169,7 +174,7 @@ void root::MeanTraj::add_ocv(int index) {
 }
 
 
-void root::MeanTraj::declare_optimization() {
+void root::MeanTraj::declare_optimization() { // Need to get rid of this step... It is unecessary as mean_traj is just acting as a place holder. In other words when I am defining the states I should be doing this as well
     for (int i=0;i<=steps;i++) {
         mag_ocv(0,i) = sqrt(pow(mean_state(ocv_idx[0]*2+1,i),2)+pow(mean_state(ocv_idx[1]*2+1,i),2)+pow(mean_state(ocv_idx[2]*2+1,i),2)); // (1,s1)
         for (int j=0;j<ocv_size;j++) {
@@ -180,48 +185,81 @@ void root::MeanTraj::declare_optimization() {
             mean_pos(i,j) = final_pos(i,j); // (ocv,s1)
             final_vel(i,j) = mean_state(ocv_idx[j]*2+1,i); // (ocv,s1)
             mean_vel(i,j) = final_vel(i,j); // (ocv,s1)
-        }
+        }    
     }
+    check_pos = final_pos;
+
 }
 
 void root::MeanTraj::update_optimizaion() {
     for (int i=0;i<=steps;i++) {
         mag_ocv(i) = sqrt(pow(final_vel(i,0),2)+pow(final_vel(i,1),2)+pow(final_vel(i,2),2)); // (1,s1)
-        mean_pos.row(i) = final_pos.row(i);
-        mean_vel.row(i) = final_vel.row(i);
+        //mean_pos.row(i) = final_pos.row(i);
+        //mean_vel.row(i) = final_vel.row(i);
         J.row(i) = final_vel.row(i);
         unit_prime(0,i) = final_vel(i,0)/mag_ocv(i);
         unit_prime(1,i) = final_vel(i,1)/mag_ocv(i);
         unit_prime(2,i) = final_vel(i,2)/mag_ocv(i);
-    }
-}
 
-void root::MeanTraj::optimize(float obj_x,float obj_y,float obj_z) {
-    obs(0) = obj_x;
-    obs(1) = obj_y;
-    obs(2) = obj_z;
+        check_pos = final_pos;
+    }
 
     update_g();
-    for (int i=0;i<100;i++) {
-        final_pos = final_pos - (1/sensitivity[1])*Kp*(sensitivity[0]*Kp_inv*(final_pos-mean_pos) + g_pos.transpose());
-        final_vel = final_vel - (1/sensitivity[1])*Kv*(sensitivity[0]*Kv_inv*(final_vel-mean_vel) + g_vel.transpose());
+}
+
+void root::MeanTraj::optimize(std::vector<float> obj_x,std::vector<float> obj_y,std::vector<float> obj_z) {
+    obs.resize(obj_x.size(),ocv_size);
+    if (obj_x.size() != obj_y.size() || obj_x.size() != obj_z.size()) {
+        //std::cout << "Error with computing or storing position of obsticals. Trajectory failed" << std::endl;
+        exit(1);
+    }
+    for (int z=0; z<obj_x.size(); z++) {
+        obs(z,0) = obj_x[z];
+        obs(z,1) = obj_y[z];
+        obs(z,2) = obj_z[z];
+    }
+    //std::cout << obs << std::endl;
+    update_g();
+
+    for (int i=0;i<500;i++) { // number of iteration of optimizaion.  This needs a new criterion to define when it finishes
+        final_pos = final_pos - (sensitivity[0])*Kp*(sensitivity[1]*Kp_inv*(final_pos-mean_pos) + g_pos.transpose());
+        final_vel = final_vel - (sensitivity[0])*Kv*(sensitivity[1]*Kv_inv*(final_vel-mean_vel) + g_vel.transpose());
+        if (i == 10 || i == 20 || i == 350 || i == 375 || i == 390 || i == 400 || i == 450) {
+          std::cout << final_pos.transpose() << std::endl;
+        }
         update_optimizaion();
     }
 }
 
 void root::MeanTraj::update_g() { // the way you initialize your ocv must be in the same order that you input your object detection cordinates ********
+
     for (int i=0;i<=steps;i++) {
-        update_J(i);
-        for (int j=0;j<ocv_size;j++) {
-            del_c(j) = obs(j) - final_pos(i,j); // vector computed distance between object and robot state(i).  Both vectors are taken from the robots initial position
-            if (abs(del_c(j)) < .5) {
-                del_c(j) = 1;
+        update_J(i); 
+        for (int k=0;k<obs.rows();k++) {
+            for (int j=0;j<ocv_size;j++) {
+                del_c(j) = obs(k,j) - final_pos(i,j); // vector computed distance between object and robot state(i).  Both vectors are taken from the robots initial position
+                //std::cout << del_c(j) << std::endl;
+                if (del_c(j) < .3 && del_c(j) > 0) { // need a condition that makes gradient -1 so optimization can move in different directions
+                    del_c(j) =1;
+                }
+                else if (del_c(j) > -.3 && del_c(j) < 0) {
+                    del_c(j) =-1;
+                }
+                else {
+                    del_c(j) = 0;
+                }
             }
-            else {
-                del_c(j) = 0;
+            c = sqrt(pow(del_c(0),2) + pow(del_c(1),2) + pow(del_c(2),2));  /// <----- ** hard coded indexes, ultimitly you wouldnt know how many indexes**************
+            if (del_c(0)*del_c(1)*del_c(2) == 0) { // also not including the making c go to 0...
+                del_c(0) = 0;
+                del_c(1) = 0;
+                del_c(2) = 0;
+                c = 0;
+            }
+            if (del_c(0)*del_c(1)*del_c(2) != 0) { // also not including the making c go to 0...
+                break;
             }
         }
-        c = sqrt(pow(del_c(0),2) + pow(del_c(1),2) + pow(del_c(2),2));  /// <----- ** hard coded indexes, ultimitly you wouldnt know how many indexes**************
         g_pos.col(i) = IJ.transpose()*mag_ocv(i)*(I - unit_prime.col(i)*unit_prime.col(i).transpose())*del_c - c*pow(mag_ocv(i),-2)*(I - unit_prime.col(i)*unit_prime.col(i).transpose())*unit_dubprime.col(i);
         g_vel.col(i) = IJ.transpose()*c*unit_prime.col(i);
     }
@@ -233,28 +271,50 @@ void root::MeanTraj::update_J(int step) {
     }
 }
 
+void root::MeanTraj::traj(int go) {
+
+    if (go == 1) {
+        std::cout << final_pos.transpose() << std::endl;
+
+        obs_plot.resize(obs.rows(),final_pos.transpose().cols());
+        for (int i=0;i<obs.rows();i++) {
+            obs_plot.row(i) = final_pos.transpose().row(1)*0;
+            for (int j=0;j<3;j++) {
+                obs_plot(i,j) = obs(i,j);
+        } 
+        }
+        std::cout << obs_plot << std::endl;
+    }
+}
+
+void root::MeanTraj::surf(int play) {
+    if (play == 1) {
+        std::cout << Kp << std::endl;
+    }
+    else if (play == 2) {
+        std::cout << Kp_inv << std::endl;
+    }
+    else if (play == 3) {
+        std::cout << Kv << std::endl;
+    }
+    else if (play == 4) {
+        std::cout << Kv_inv << std::endl;
+    }
+    else if (play == 5) {
+        std::cout << Ka_inv << std::endl;
+    }
+}
 
 // Display Stuff ----
 void root::MeanTraj::get_something() {
 
-    //std::cout << Kp_inv << std::endl;
-    //std::cout << Kp_inv.rows() << "," << Kp_inv.cols() << std::endl;
-    //td::cout << "  " << std::endl;
-
-    //std::cout << Kp << std::endl;
-    //std::cout << Kp.rows() << "," << Kp_inv.cols() << std::endl;
+    //std::cout << Q(21,21) << std::endl;
+    //std::cout << Q.rows() << "," << Q.cols() << std::endl;      
     //std::cout << "  " << std::endl;
-
-    //std::cout << Kv << std::endl;
-    //std::cout << Kv.rows() << "," << Kp_inv.cols() << std::endl;    
-    //std::cout << "  " << std::endl;
-
-    //std::cout << Kv_inv << std::endl;
-    //std::cout << Kv_inv.rows() << "," << Kp_inv.cols() << std::endl;
 
     //std::cout << "  " << std::endl;
 
-    //std::cout << final_pos.transpose() << std::endl;
+
     //std::cout << final_pos.rows() << "," << final_pos.cols() << std::endl;
     //std::cout << "  " << std::endl;
 
@@ -272,6 +332,9 @@ void root::MeanTraj::get_something() {
     //std::cout << mean_state.rows() << "," << mean_state.cols() << std::endl;
     //std::cout << "  " << std::endl;
 
+    //std::cout << sensitivity[0] << std::endl;
+    //std::cout << sensitivity[1] << std::endl;
+    //std::cout << sensitivity[2] << std::endl;
 
     //std::cout << Q.rows() << "  " << Q.cols() << std::endl;
 }

@@ -12,12 +12,21 @@ Eigen::Vector3f run(float x, float y, float z) {
 }
 
 
+
 int main() {
     bool a = false;
     int const d = 8;
     Eigen::Matrix<float,Eigen::Dynamic,Eigen::Dynamic> trying;
     Eigen::Matrix<float,Eigen::Dynamic,Eigen::Dynamic> w;
     Eigen::Matrix<float,Eigen::Dynamic,Eigen::Dynamic> s;
+    Eigen::Matrix<float,Eigen::Dynamic,Eigen::Dynamic> z;
+
+    std::vector<float> x;
+    x.push_back(1);
+    x.push_back(2);
+    z.resize(2,1);
+    z(0) = x[0];
+    z(1) = x[1];
 
 
     Eigen::Matrix<float,1,8> bM;
@@ -45,7 +54,7 @@ int main() {
     arr.push_back(5);
     trying(0) = 100;
     trying(1) = 100;
-    std::cout << w*s << std::endl;
+    std::cout << x.size() << std::endl;
     
     return 0;
 }

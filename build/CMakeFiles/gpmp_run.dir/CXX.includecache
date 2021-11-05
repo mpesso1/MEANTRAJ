@@ -17,6 +17,8 @@ iostream
 /home/mason/GPMP_Mason/source/run.cpp
 gpmp.h
 /home/mason/GPMP_Mason/source/gpmp.h
+Eigen/Dense
+-
 iostream
 -
 
